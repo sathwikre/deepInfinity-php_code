@@ -1,0 +1,276 @@
+/* ============================================================
+   style.css — shared styles for all LoginSample PHP pages
+   ============================================================ */
+
+/* --- Reset & base ----------------------------------------- */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #f0f2f5;
+    color: #222;
+    min-height: 100vh;
+}
+
+a {
+    color: #2563eb;
+    text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+/* --- Top navigation bar ----------------------------------- */
+.navbar {
+    background: #1e3a5f;
+    color: #fff;
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+}
+
+.navbar .brand {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.03em;
+}
+
+.navbar nav a {
+    color: #cbd5e1;
+    margin-left: 1.5rem;
+    font-size: 0.95rem;
+    transition: color 0.15s;
+}
+.navbar nav a:hover,
+.navbar nav a.active { color: #fff; text-decoration: none; }
+
+/* --- Page wrapper ----------------------------------------- */
+.page-wrapper {
+    max-width: 720px;
+    margin: 2.5rem auto;
+    padding: 0 1rem;
+}
+
+/* --- Card ------------------------------------------------- */
+.card {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    padding: 2rem 2.5rem;
+}
+
+.card h1 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: #1e3a5f;
+}
+
+.card h2 {
+    font-size: 1.15rem;
+    margin-bottom: 1rem;
+    color: #1e3a5f;
+}
+
+/* --- Form elements ---------------------------------------- */
+.form-group {
+    margin-bottom: 1.1rem;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+    color: #374151;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group input[type="file"] {
+    width: 100%;
+    padding: 0.6rem 0.85rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    background: #f9fafb;
+    transition: border-color 0.15s;
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="password"]:focus {
+    outline: none;
+    border-color: #2563eb;
+    background: #fff;
+}
+
+.form-group input[type="file"] {
+    padding: 0.45rem 0.85rem;
+    cursor: pointer;
+}
+
+.form-group small {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+
+/* --- Buttons ---------------------------------------------- */
+.btn {
+    display: inline-block;
+    padding: 0.6rem 1.4rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+}
+
+.btn-primary {
+    background: #2563eb;
+    color: #fff;
+}
+.btn-primary:hover { background: #1d4ed8; }
+
+.btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+.btn-secondary:hover { background: #d1d5db; }
+
+.btn-danger {
+    background: #dc2626;
+    color: #fff;
+}
+.btn-danger:hover { background: #b91c1c; }
+
+.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* --- Alert messages --------------------------------------- */
+.alert {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.alert-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+.alert-success {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.alert-info {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+}
+
+/* --- Result / output area --------------------------------- */
+.result-box {
+    margin-top: 1.5rem;
+}
+
+.result-box h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #374151;
+}
+
+.result-box textarea,
+.result-box pre {
+    width: 100%;
+    min-height: 180px;
+    padding: 0.85rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: #f9fafb;
+    font-size: 0.9rem;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    resize: vertical;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.6;
+}
+
+/* --- Dashboard cards -------------------------------------- */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-top: 1.5rem;
+}
+
+.dash-card {
+    background: #f8faff;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    padding: 1.5rem 1.25rem;
+    text-align: center;
+    transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.dash-card:hover {
+    box-shadow: 0 4px 16px rgba(37,99,235,.12);
+    border-color: #93c5fd;
+}
+
+.dash-card .dash-icon {
+    font-size: 2.4rem;
+    margin-bottom: 0.6rem;
+}
+
+.dash-card h3 {
+    font-size: 1.05rem;
+    color: #1e3a5f;
+    margin-bottom: 0.35rem;
+}
+
+.dash-card p {
+    font-size: 0.85rem;
+    color: #6b7280;
+    margin-bottom: 1rem;
+}
+
+.dash-card a {
+    display: inline-block;
+    padding: 0.45rem 1.1rem;
+    background: #2563eb;
+    color: #fff;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    transition: background 0.15s;
+}
+.dash-card a:hover { background: #1d4ed8; text-decoration: none; }
+
+/* --- Spinner (used during upload) ------------------------- */
+.spinner {
+    display: none;
+    margin-top: 1rem;
+    color: #6b7280;
+    font-size: 0.9rem;
+}
+.spinner.visible { display: block; }
+
+/* --- Utility ---------------------------------------------- */
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.mt-3 { margin-top: 1.5rem; }
+.text-muted { color: #6b7280; font-size: 0.85rem; }
+.text-center { text-align: center; }
