@@ -274,3 +274,135 @@ a:hover { text-decoration: underline; }
 .mt-3 { margin-top: 1.5rem; }
 .text-muted { color: #6b7280; font-size: 0.85rem; }
 .text-center { text-align: center; }
+
+/* ============================================================
+   Upload history and details — added for persistent storage
+   ============================================================ */
+
+/* --- Warning alert (amber) -------------------------------- */
+.alert-warning {
+    background: #fef9c3;
+    color: #854d0e;
+    border: 1px solid #fde047;
+}
+
+/* --- Small button variant (used in history table rows) ---- */
+.btn-sm {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.82rem;
+}
+
+/* --- Responsive table wrapper ----------------------------- */
+.table-wrapper {
+    overflow-x: auto;
+    margin-top: 0.5rem;
+}
+
+/* --- Upload history table --------------------------------- */
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.history-table thead tr {
+    background: #1e3a5f;
+    color: #fff;
+}
+
+.history-table th {
+    padding: 0.65rem 0.9rem;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.history-table tbody tr {
+    border-bottom: 1px solid #e5e7eb;
+    transition: background 0.1s;
+}
+
+.history-table tbody tr:hover {
+    background: #f0f7ff;
+}
+
+.history-table td {
+    padding: 0.6rem 0.9rem;
+    vertical-align: middle;
+}
+
+/* Row number column — narrow and centred */
+.history-table .td-num {
+    width: 2.5rem;
+    text-align: center;
+    color: #6b7280;
+    font-size: 0.82rem;
+}
+
+/* Filename column — truncate long names with ellipsis */
+.history-table .td-name {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* --- Upload details key/value table ----------------------- */
+.details-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.details-table tr {
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.details-table th {
+    width: 140px;
+    padding: 0.6rem 0.9rem 0.6rem 0;
+    font-weight: 600;
+    color: #374151;
+    text-align: left;
+    vertical-align: top;
+    white-space: nowrap;
+}
+
+.details-table td {
+    padding: 0.6rem 0.9rem;
+    color: #111827;
+    word-break: break-all;
+}
+
+/* --- File type badges ------------------------------------- */
+/* Base badge style */
+.badge {
+    display: inline-block;
+    padding: 0.18rem 0.55rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+/* One colour per file type */
+.badge-pdf  { background: #fee2e2; color: #991b1b; }
+.badge-txt  { background: #e0f2fe; color: #075985; }
+.badge-jpg,
+.badge-jpeg { background: #fef9c3; color: #854d0e; }
+.badge-png  { background: #dcfce7; color: #166534; }
+
+/* --- Dashboard grid extended to 2×2 (3 cards) ------------ */
+/* Override the existing 1fr 1fr grid when a third card is present */
+.dashboard-grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-top: 1.5rem;
+}
+
+@media (max-width: 520px) {
+    .dashboard-grid-3 { grid-template-columns: 1fr; }
+}

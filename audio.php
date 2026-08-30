@@ -97,6 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <nav>
             <a href="dashboard.php">Dashboard</a>
             <a href="upload-file.php">File Upload</a>
+            <a href="upload-history.php">History</a>
             <a href="audio.php" class="active">Audio</a>
             <a href="logout.php">Logout</a>
         </nav>

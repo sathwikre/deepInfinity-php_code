@@ -1,186 +1,263 @@
-# WPF + PHP Web + Local Azure Functions — Login Sample
+# LoginSample — PHP + .NET Web Application
 
-A local-only application with **two frontends** sharing one .NET backend:
-
-| Frontend | Technology | Location |
-|---|---|---|
-| Desktop app | WPF / C# (.NET 8) | `LoginClient/` |
-| Web app | PHP 8 + Apache (XAMPP) | `C:\xampp\htdocs\loginsample\` |
-| Backend API | .NET Isolated Azure Functions v4 | `LoginFunction/` |
-
-No Azure account or cloud deployment needed — everything runs on your machine.
+A local-only web application with a **PHP frontend** (served by Apache/XAMPP) and a **.NET Isolated Azure Functions backend**. No cloud deployment is required — everything runs on your machine.
 
 ---
 
-## Features
+## Table of Contents
 
-| Feature | Description |
-|---|---|
-| Login | Validates credentials (`admin` / `1234`) via the Azure Function |
-| File / Image Upload | Extracts text from `.txt`, `.pdf`, `.jpg`, `.jpeg`, `.png` (OCR via Tesseract for images) |
-| Audio Transcription | Transcribes `.mp3` and `.wav` using local OpenAI Whisper — no cloud API |
-
----
-
-## What was built and changed
-
-### Original project
-The original project was a **WPF desktop application** (`LoginClient`) talking to a local **Azure Function** backend (`LoginFunction`). It had:
-- A login window
-- A dashboard with two features: file/image reader and audio transcription
-- The Azure Function handled all processing: login validation, PDF/OCR text extraction, and Whisper-based audio transcription
-
-### Changes made to the existing .NET project
-
-| File | What changed |
-|---|---|
-| `LoginFunction/Functions/TranscribeAudioFunction.cs` | Replaced broken `System.Speech` recognizer with a Python Whisper subprocess. Fixed temp file leak in `ConvertToWaveStream`. Added 10-minute timeout with process kill on overflow. |
-| `LoginFunction/LoginFunction.csproj` | Removed `NAudio`, `System.Speech`, `Vosk` packages (no longer needed). Added `whisper_transcribe.py` as a `CopyToOutputDirectory` asset. |
-| `LoginFunction/local.settings.json` | Added `WHISPER_PYTHON_EXE` and `WHISPER_MODEL` settings for configurable Python path and model size. |
-| `LoginFunction/whisper_transcribe.py` | **New file.** Python script that loads the Whisper model and transcribes audio. Redirects all Whisper progress output to stderr so only the clean transcript reaches stdout for C# to read. |
-| `LoginClient/Pages/AudioTranscriptionPage.xaml.cs` | Replaced `TranscribeAudioLocal()` (broken Windows Speech fallback) with a call to `_apiService.TranscribeAudioAsync()`. Removed unused `System.Speech` and `NAudio` imports. |
-| `LoginClient/LoginClient.csproj` | Removed unused `NAudio` and `System.Speech` package references. |
-| `C:\xampp\php\php.ini` | Raised `upload_max_filesize` and `post_max_size` from 40 MB to **64 MB** to support audio file uploads up to 50 MB. |
-
-### New files added — PHP web frontend
-
-All PHP files live at `C:\xampp\htdocs\loginsample\`. They call the **same Azure Function endpoints** as the WPF app — no backend code was duplicated.
-
-| File | Purpose |
-|---|---|
-| `config.php` | Shared config: `API_BASE_URL`, cURL helpers, session guard, XSS-safe `h()` function |
-| `login.php` | Login form → POSTs JSON to `/api/login` → sets PHP session on success |
-| `dashboard.php` | Welcome page shown after login with navigation cards |
-| `upload-file.php` | File/image picker → POSTs multipart to `/api/read-file` → shows extracted text |
-| `audio.php` | Audio file picker → POSTs multipart to `/api/transcribe-audio` → shows transcript |
-| `logout.php` | Destroys PHP session and redirects to login |
-| `css/style.css` | Shared stylesheet: navbar, cards, forms, buttons, alerts, result boxes |
+1. [Project Overview](#1-project-overview)
+2. [Technologies Used](#2-technologies-used)
+3. [Architecture](#3-architecture)
+4. [Project Folder Structure](#4-project-folder-structure)
+5. [Prerequisites](#5-prerequisites)
+6. [Installation and Setup](#6-installation-and-setup)
+7. [Configuration](#7-configuration)
+8. [How to Run Locally](#8-how-to-run-locally)
+9. [Features](#9-features)
+10. [API Endpoints](#10-api-endpoints)
+11. [Database](#11-database)
+12. [Step-by-Step Testing](#12-step-by-step-testing)
+13. [Important Notes and Limitations](#13-important-notes-and-limitations)
 
 ---
 
-## Project layout
+## 1. Project Overview
+
+LoginSample is an internship project that allows a user to:
+
+- Log in with a username and password
+- Upload a file (PDF, image, or text) and extract its text content
+- View the full history of uploaded files including extracted text
+- Upload an audio file and have it transcribed to text locally using OpenAI Whisper
+
+All processing happens locally. No data is sent to any cloud service.
+
+---
+
+## 2. Technologies Used
+
+| Layer | Technology |
+|---|---|
+| Web frontend | PHP 8.0 served by Apache (XAMPP) |
+| Styles | Plain CSS (no framework) |
+| Frontend validation | Vanilla JavaScript |
+| Backend API | C# / .NET 8 Isolated Azure Functions v4 |
+| PDF extraction | PdfPig (NuGet) |
+| OCR for images | Tesseract 5 (NuGet) |
+| Audio transcription | OpenAI Whisper (Python 3.11, local) |
+| Audio decoding | FFmpeg (local, on PATH) |
+| Database | SQLite via PHP PDO (`pdo_sqlite` extension) |
+| File storage | Local filesystem (`uploads/` directory) |
+
+---
+
+## 3. Architecture
 
 ```
-LoginSample/
-├── LoginSample.slnx
+Browser
+  │
+  │  HTTP (form POST or page load)
+  ▼
+Apache / XAMPP  — PHP pages at localhost/loginsample/
+  │
+  │  cURL HTTP POST (JSON or multipart/form-data)
+  ▼
+Azure Function host — localhost:7071
+  ├── POST /api/login            ← JSON { username, password }
+  ├── POST /api/read-file        ← multipart, field name "file"
+  └── POST /api/transcribe-audio ← multipart, field name "file"
+                                        │
+                                        └── Python subprocess
+                                            whisper_transcribe.py
+                                            (audio → transcript)
+
+PHP also writes directly to:
+  ├── SQLite database  → data/uploads.db   (upload history)
+  └── Local filesystem → uploads/          (stored files)
+```
+
+**How PHP and .NET communicate:**
+PHP uses cURL (`call_api_json` for login, `call_api_multipart` for files) to POST to the Azure Function. The Function returns a JSON response. PHP reads the JSON and either renders the result or saves it to SQLite. The Azure Function has no knowledge of PHP or SQLite — it only receives HTTP requests and returns JSON.
+
+---
+
+## 4. Project Folder Structure
+
+```
+C:\xampp\htdocs\loginsample\        ← PHP web root (served by Apache)
 │
-├── LoginClient/                        # WPF desktop app (net8.0-windows)
-│   ├── Models/
-│   ├── Pages/
-│   │   ├── DashboardPage.xaml/.cs
-│   │   ├── FileReaderPage.xaml/.cs
-│   │   └── AudioTranscriptionPage.xaml/.cs  ← fixed (was calling broken local Speech API)
-│   ├── Services/ApiService.cs
-│   ├── MainWindow.xaml/.cs
-│   └── DashboardWindow.xaml/.cs
+├── config.php                      ← API base URL, cURL helpers, session guard
+├── database.php                    ← SQLite connection, table setup, DB helpers
+├── login.php                       ← Login form → calls /api/login
+├── dashboard.php                   ← Dashboard with 3 feature cards
+├── upload-file.php                 ← File upload, extraction, DB save
+├── upload-history.php              ← List all uploads for logged-in user
+├── upload-details.php              ← View metadata + extracted text for one upload
+├── download.php                    ← Safely stream stored file to browser
+├── audio.php                       ← Audio upload → calls /api/transcribe-audio
+├── logout.php                      ← Destroys session, redirects to login
 │
-├── LoginFunction/                      # Azure Function backend (net8.0)
-│   ├── Functions/
-│   │   ├── LoginFunction.cs            # POST /api/login
-│   │   ├── ReadFileFunction.cs         # POST /api/read-file
-│   │   └── TranscribeAudioFunction.cs  # POST /api/transcribe-audio  ← rewritten
-│   ├── Helpers/MultipartFormHelper.cs
-│   ├── Models/
-│   ├── whisper_transcribe.py           # NEW — Python Whisper script
+├── css/
+│   └── style.css                   ← Shared stylesheet for all pages
+│
+├── data/
+│   └── uploads.db                  ← SQLite database (auto-created on first use)
+│
+└── uploads/                        ← Stored uploaded files (UUID-prefixed names)
+    ├── a3f2c1d0...-notes.pdf
+    ├── 7b8e9f2a...-photo.png
+    └── ...
+
+c:\deep\.net\LoginSample\           ← .NET solution root
+│
+├── LoginFunction\                  ← Azure Functions backend
+│   ├── Functions\
+│   │   ├── LoginFunction.cs        ← POST /api/login
+│   │   ├── ReadFileFunction.cs     ← POST /api/read-file
+│   │   └── TranscribeAudioFunction.cs  ← POST /api/transcribe-audio
+│   ├── Helpers\
+│   │   └── MultipartFormHelper.cs  ← Parses multipart/form-data
+│   ├── Models\
+│   │   ├── LoginRequest.cs / LoginResponse.cs
+│   │   ├── FileReadResponse.cs
+│   │   └── AudioTranscriptionResponse.cs
+│   ├── whisper_transcribe.py       ← Python script for Whisper transcription
 │   ├── Program.cs
 │   ├── host.json
-│   └── local.settings.json             # updated — added Whisper settings
+│   ├── local.settings.json         ← Local config (Whisper model, Python path)
+│   └── LoginFunction.csproj
 │
-└── README.md
-
-C:\xampp\htdocs\loginsample\            # NEW — PHP web frontend
-    ├── config.php
-    ├── login.php
-    ├── dashboard.php
-    ├── upload-file.php
-    ├── audio.php
-    ├── logout.php
-    └── css/style.css
+└── LoginClient\                    ← Original WPF desktop app (still functional)
+    └── ...
 ```
 
 ---
 
-## Architecture — how PHP and .NET communicate
+## 5. Prerequisites
 
+Install all of the following before running the project.
+
+### 5.1 XAMPP (PHP + Apache)
+- Already installed at `C:\xampp`
+- PHP 8.0.30, Apache included
+- The `pdo_sqlite` extension must be enabled (it is enabled by default in XAMPP 8.x)
+
+### 5.2 .NET 8 SDK
 ```
-Browser (PHP page in Apache)
-      │
-      │  HTTP POST via cURL (JSON or multipart/form-data)
-      ▼
-Azure Function  localhost:7071
-      │
-      ├─ /api/login            ← JSON body  { username, password }
-      ├─ /api/read-file        ← multipart  file field "file"
-      └─ /api/transcribe-audio ← multipart  file field "file"
-                                             │
-                                             └─ spawns Python subprocess
-                                                py -3.11 whisper_transcribe.py
+https://dotnet.microsoft.com/download
 ```
 
-PHP uses **cURL** (`call_api_json` and `call_api_multipart` in `config.php`) to POST to the Azure Function. The Function processes the request and returns JSON. PHP reads the JSON and renders the result on the page.
-
-The WPF app does the exact same thing using `HttpClient` in `ApiService.cs`. Both frontends hit **identical endpoints** — the backend has no knowledge of which frontend is calling it.
-
----
-
-## Prerequisites
-
-### 1. .NET 8 SDK
-Download from https://dotnet.microsoft.com/download
-
-### 2. Azure Functions Core Tools v4
+### 5.3 Azure Functions Core Tools v4
 ```powershell
 npm install -g azure-functions-core-tools@4 --unsafe-perm true
 ```
 
-### 3. XAMPP (PHP + Apache)
-Already installed at `C:\xampp`. Includes PHP 8.0 and Apache.
-
-### 4. Python 3.11 (for audio transcription)
+### 5.4 Python 3.11
+Required for audio transcription only.
 ```powershell
+# Install the Whisper library for Python 3.11
 py -3.11 -m pip install openai-whisper
 ```
-The first transcription downloads model weights (~75 MB for `tiny`) to `~/.cache/whisper` automatically.
+On first transcription Whisper downloads the model weights (~75 MB for `tiny`) to `~/.cache/whisper`.
 
-### 5. FFmpeg (for audio transcription)
-Whisper uses FFmpeg internally to decode MP3. Must be on your system `PATH`.
-- Download: https://www.gyan.dev/ffmpeg/builds/ — get the **essentials** build
-- Extract and add the `bin` folder to your `PATH`
+### 5.5 FFmpeg
+Whisper uses FFmpeg to decode MP3 files. FFmpeg must be on your system `PATH`.
+- Download the **essentials** build from: https://www.gyan.dev/ffmpeg/builds/
+- Extract and add the `bin` folder to your system `PATH`
 - Verify: `ffmpeg -version`
 
 ---
 
-## Running the application
+## 6. Installation and Setup
 
-You need **two things running** at the same time: the Azure Function and Apache.
+### 6.1 PHP application
+The PHP files are already in place at `C:\xampp\htdocs\loginsample\`.
 
-### Step 1 — Build the .NET project
+The `data/` and `uploads/` directories must exist and be writable by Apache:
+```powershell
+New-Item -ItemType Directory -Force "C:\xampp\htdocs\loginsample\data"
+New-Item -ItemType Directory -Force "C:\xampp\htdocs\loginsample\uploads"
+```
+The SQLite database file (`data/uploads.db`) is **created automatically** the first time any page that includes `database.php` is loaded. No manual database setup is needed.
+
+### 6.2 .NET Function
 ```powershell
 cd c:\deep\.net\LoginSample
 dotnet build
 ```
 This also copies `whisper_transcribe.py` to the function output directory.
 
-### Step 2 — Start the Azure Function backend
+---
 
-Open a terminal and run:
+## 7. Configuration
+
+### PHP — `config.php`
+```php
+define('API_BASE_URL', 'http://localhost:7071/api');
+```
+Change this only if the Azure Function runs on a different port.
+
+### PHP — `database.php`
+```php
+define('DB_PATH',      __DIR__ . '/data/uploads.db');  // SQLite file location
+define('UPLOADS_DIR',  __DIR__ . '/uploads/');          // stored files location
+define('MAX_UPLOAD_BYTES', 35 * 1024 * 1024);           // 35 MB limit
+```
+
+### .NET — `LoginFunction/local.settings.json`
+```json
+{
+  "Values": {
+    "WHISPER_PYTHON_EXE": "py",
+    "WHISPER_MODEL": "tiny"
+  }
+}
+```
+
+| Setting | Default | Description |
+|---|---|---|
+| `WHISPER_PYTHON_EXE` | `py` | Python launcher. Set to a full path if `py` is not on PATH |
+| `WHISPER_MODEL` | `tiny` | Whisper model: `tiny` · `base` · `small` · `medium` · `large` |
+
+### php.ini upload limits
+`C:\xampp\php\php.ini` is already configured with:
+```
+upload_max_filesize = 64M
+post_max_size       = 64M
+```
+These are larger than the application's own 35 MB limit, so no changes are needed.
+
+---
+
+## 8. How to Run Locally
+
+You need **two things running** at the same time.
+
+### Step 1 — Build the .NET project
+```powershell
+cd c:\deep\.net\LoginSample
+dotnet build
+```
+
+### Step 2 — Start the Azure Function backend
 ```powershell
 cd c:\deep\.net\LoginSample\LoginFunction
 func start
 ```
-Wait until you see all three endpoints listed:
+Wait until you see all three endpoints:
 ```
 Functions:
     Login:            [POST] http://localhost:7071/api/login
     ReadFile:         [POST] http://localhost:7071/api/read-file
     TranscribeAudio:  [POST] http://localhost:7071/api/transcribe-audio
 ```
-Leave this terminal open. Do not close it.
+Leave this terminal open.
 
 ### Step 3 — Start Apache
 
 **Option A — XAMPP Control Panel (recommended):**
-1. Open: `C:\xampp\xampp-control.exe`
+1. Open `C:\xampp\xampp-control.exe`
 2. Click **Start** next to **Apache**
 3. The row turns green — Apache is running on port 80
 
@@ -188,220 +265,239 @@ Leave this terminal open. Do not close it.
 ```powershell
 C:\xampp\apache\bin\httpd.exe
 ```
-Leave this terminal open.
 
-**Verify Apache is working** — open http://localhost in your browser. You should see the XAMPP welcome page.
+Verify Apache is running: open http://localhost — you should see the XAMPP welcome page.
 
-### Step 4 — Open the PHP web app
-
-Open your browser and go to:
+### Step 4 — Open the application
 ```
 http://localhost/loginsample/login.php
 ```
 Login with `admin` / `1234`.
 
-### Running the WPF desktop app (optional)
-The WPF app is the original desktop version — it connects to the same backend.
-```powershell
-cd c:\deep\.net\LoginSample\LoginClient
-dotnet run
-```
-
----
-
-## If Apache won't start (port 80 conflict)
-
-Port 80 may already be used by IIS or another service. Check what is using it:
+### If Apache won't start (port 80 conflict)
 ```powershell
 netstat -ano | findstr :80
 ```
-
-If something is blocking port 80, change Apache's port:
-1. Open `C:\xampp\apache\conf\httpd.conf`
-2. Find `Listen 80` and change it to `Listen 8080`
-3. Restart Apache
-4. Access the app at `http://localhost:8080/loginsample/login.php` instead
+If port 80 is in use, open `C:\xampp\apache\conf\httpd.conf`, change `Listen 80` to `Listen 8080`, restart Apache, then use `http://localhost:8080/loginsample/login.php`.
 
 ---
 
-## Login credentials
+## 9. Features
 
-| Username | Password |
-|---|---|
-| `admin` | `1234` |
+### Login
+- Username: `admin`, Password: `1234`
+- Credentials are validated by the Azure Function
+- Session is stored in a PHP cookie — protected pages redirect to login if session is missing
+- Logout destroys the session completely
+
+### File / Image Upload
+- Supported formats: `.txt`, `.pdf`, `.jpg`, `.jpeg`, `.png`
+- Maximum file size: **35 MB** (enforced by JavaScript before upload AND by PHP on the server)
+- The file is saved permanently to `uploads/` with a UUID-based unique filename
+- Text is extracted by the Azure Function (PdfPig for PDF, Tesseract OCR for images, StreamReader for TXT)
+- The extracted text and file metadata are saved to the SQLite database
+- If extraction succeeds but the database save fails, an explicit warning is shown — the system never silently claims a record was saved when it was not
+
+### Upload History
+- Every successful upload appears in the history list
+- History is user-specific — only uploads made by the logged-in user are shown
+- Uploads are sorted newest first
+- Each row shows: file name, type badge, size, upload date/time, and a View button
+
+### Upload Details
+- Shows full metadata: file name, type, size, uploaded by, date/time, stored filename
+- Displays the full extracted text saved in the database
+- Provides a download button to retrieve the original file if it still exists on disk
+- The download goes through `download.php` which re-validates ownership before streaming
+
+### Audio Transcription
+- Supported formats: `.mp3`, `.wav`
+- Maximum file size: 50 MB
+- Transcription is performed locally by OpenAI Whisper (no internet required)
+- Audio transcription is not saved to history (file uploads only)
 
 ---
 
-## API endpoints
+## 10. API Endpoints
 
 All endpoints are served by the Azure Function at `http://localhost:7071`.
 
 ### POST /api/login
 ```
 Content-Type: application/json
-
-{ "username": "admin", "password": "1234" }
+Body: { "username": "admin", "password": "1234" }
 ```
-Success: `{ "success": true, "message": "Login Successful" }`
-Failure: `{ "success": false, "message": "Invalid Credentials" }`
+```json
+{ "success": true,  "message": "Login Successful"    }
+{ "success": false, "message": "Invalid Credentials" }
+```
 
 ### POST /api/read-file
 ```
 Content-Type: multipart/form-data
 Field name:   file
 Accepted:     .txt  .pdf  .jpg  .jpeg  .png
-Max size:     25 MB
 ```
-Success: `{ "success": true, "fileName": "doc.pdf", "content": "Extracted text...", "message": "" }`
-Failure: `{ "success": false, "fileName": "doc.pdf", "content": "", "message": "Reason" }`
+```json
+{ "success": true,  "fileName": "doc.pdf", "content": "Extracted text...", "message": "" }
+{ "success": false, "fileName": "doc.pdf", "content": "",                  "message": "Reason for failure" }
+```
 
 ### POST /api/transcribe-audio
 ```
 Content-Type: multipart/form-data
 Field name:   file
 Accepted:     .mp3  .wav
-Max size:     50 MB
 ```
-Success: `{ "success": true, "fileName": "audio.mp3", "transcript": "Transcribed text...", "message": "" }`
-Failure: `{ "success": false, "fileName": "audio.mp3", "transcript": "", "message": "Reason" }`
+```json
+{ "success": true,  "fileName": "audio.mp3", "transcript": "Transcribed text...", "message": "" }
+{ "success": false, "fileName": "audio.mp3", "transcript": "",                    "message": "Reason for failure" }
+```
 
 ---
 
-## How login works
+## 11. Database
 
-1. User fills in the form on `login.php` and clicks Login
-2. Browser sends a `POST` request to `login.php` with `username` and `password`
-3. PHP reads `$_POST['username']` and `$_POST['password']`
-4. `call_api_json('/login', [...])` in `config.php` sends a cURL POST with a JSON body to `localhost:7071/api/login`
-5. The Azure Function (`LoginFunction.cs`) checks: username = `admin`, password = `1234`
-6. Returns `{ "success": true/false, "message": "..." }`
-7. If `success === true` → PHP stores `$_SESSION['username']` and redirects to `dashboard.php`
-8. If `success === false` → PHP re-renders `login.php` with the error message in red
-9. Every protected page calls `require_login()` at the top — if `$_SESSION['username']` is empty, the user is sent back to `login.php`
-10. `logout.php` clears `$_SESSION`, destroys the session cookie, and redirects to `login.php`
+### Technology
+**SQLite** via PHP's `PDO` (`pdo_sqlite` extension).
 
----
+**Why SQLite:** No separate database server is needed. The entire database is a single file. `pdo_sqlite` is already enabled in this XAMPP installation. It is the simplest option for a local-only single-user project.
 
-## How file / image extraction works
+### Location
+```
+C:\xampp\htdocs\loginsample\data\uploads.db
+```
+Created automatically on the first page load. No manual setup required.
 
-1. User picks a file on `upload-file.php` and clicks **Upload & Extract**
-2. PHP validates the extension (`.txt`, `.pdf`, `.jpg`, `.jpeg`, `.png`) and file size (≤ 25 MB)
-3. `call_api_multipart('/read-file', ...)` uses PHP's `CURLFile` to POST the file to `localhost:7071/api/read-file`
-4. The Azure Function (`ReadFileFunction.cs`) parses the multipart body via `MultipartFormHelper`, then:
-   - `.txt` → reads with `StreamReader` (UTF-8)
-   - `.pdf` → extracts text page by page using PdfPig
-   - `.jpg` / `.jpeg` / `.png` → runs Tesseract OCR using the English language model in `tessdata/`
-5. Returns `{ "success": true/false, "fileName": "...", "content": "...", "message": "..." }`
-6. PHP displays the `content` in a scrollable read-only `<textarea>`
+### Table: `uploads`
 
----
-
-## How audio transcription works
-
-1. User picks an `.mp3` or `.wav` file on `audio.php` and clicks **Upload & Transcribe**
-2. The button is immediately disabled and changes to "Transcribing…" so the user knows to wait
-3. PHP validates extension and size (≤ 50 MB), then calls `call_api_multipart` with a **600-second cURL timeout** (10 minutes)
-4. The Azure Function (`TranscribeAudioFunction.cs`) writes the uploaded bytes to a temp file, then runs:
-   ```
-   py -3.11 whisper_transcribe.py <temp_file_path> tiny
-   ```
-5. `whisper_transcribe.py` redirects `sys.stdout` to `sys.stderr` while the model loads and transcribes, so only the clean transcript text reaches stdout
-6. C# reads stdout, deletes the temp file, and returns `{ "success": true/false, "fileName": "...", "transcript": "...", "message": "..." }`
-7. PHP displays the `transcript` in a scrollable `<textarea>`
-
----
-
-## Audio transcription configuration
-
-Edit `LoginFunction/local.settings.json` to change these settings:
-
-| Setting | Default | Description |
+| Column | Type | Description |
 |---|---|---|
-| `WHISPER_PYTHON_EXE` | `py` | Python launcher. Change to a full path if `py` is not on your PATH |
-| `WHISPER_MODEL` | `tiny` | Whisper model size — see table below |
+| `id` | INTEGER PK AUTOINCREMENT | Unique row identifier |
+| `username` | TEXT | Value of `$_SESSION['username']` at upload time |
+| `original_name` | TEXT | Filename the user chose, e.g. `notes.pdf` |
+| `stored_name` | TEXT | UUID-prefixed filename saved to disk, e.g. `a3f2c1d0...-notes.pdf` |
+| `file_type` | TEXT | Extension in uppercase, e.g. `PDF`, `PNG`, `TXT` |
+| `file_size` | INTEGER | File size in bytes |
+| `file_path` | TEXT | Relative path from app root, e.g. `uploads/a3f2c1d0...-notes.pdf` |
+| `extracted_text` | TEXT | Full text returned by the Azure Function |
+| `uploaded_at` | TEXT | ISO 8601 datetime string, e.g. `2026-08-12 18:30:00` |
 
-| Model | Download size | Speed on CPU | Accuracy |
-|---|---|---|---|
-| `tiny` | ~75 MB | ~10 min per hour of audio | Good for clear speech |
-| `base` | ~140 MB | ~25 min per hour of audio | Better |
-| `small` | ~460 MB | ~60 min per hour of audio | High |
-| `medium` | ~1.5 GB | ~120 min per hour of audio | Very high |
+### Example record
+```
+id:             1
+username:       admin
+original_name:  notes.pdf
+stored_name:    a3f2c1d0e4b56789...-notes.pdf
+file_type:      PDF
+file_size:      5242880
+file_path:      uploads/a3f2c1d0e4b56789...-notes.pdf
+extracted_text: The extracted content goes here...
+uploaded_at:    2026-08-12 18:30:00
+```
 
----
-
-## NuGet packages (LoginFunction)
-
-| Package | Version | Purpose |
-|---|---|---|
-| `Microsoft.Azure.Functions.Worker` | 2.1.0 | Isolated worker runtime |
-| `Microsoft.Azure.Functions.Worker.Extensions.Http` | 3.3.0 | HTTP trigger binding |
-| `Microsoft.Azure.Functions.Worker.Sdk` | 2.0.5 | Build SDK / source generator |
-| `Microsoft.AspNetCore.WebUtilities` | 8.0.0 | `MultipartReader` for file uploads |
-| `Microsoft.Net.Http.Headers` | 8.0.0 | Content-Type / boundary parsing |
-| `PdfPig` | 0.1.15 | PDF text extraction |
-| `Tesseract` | 5.2.0 | OCR for image files |
-
-Removed packages (were unused or replaced):
-
-| Package | Reason removed |
-|---|---|
-| `NAudio` | Audio resampling no longer needed — Whisper/FFmpeg handles it |
-| `System.Speech` | Replaced with Whisper — was producing "no audio input" error |
-| `Vosk` | Was imported but never called — dead code |
+### User association
+The current login system uses a single hardcoded user (`admin`). The `username` column stores the session username for every upload. If real user accounts are added later, each user will automatically see only their own history — the `WHERE username = :username` filter is already in place in every query.
 
 ---
 
-## Step-by-step test procedure
+## 12. Step-by-Step Testing
 
-### Test 1 — Login (valid credentials)
+Make sure both Apache and the Azure Function are running before testing.
+
+### Test 1 — Login with valid credentials
 1. Open http://localhost/loginsample/login.php
 2. Enter `admin` / `1234` → click **Login**
-3. ✅ Expected: redirected to `dashboard.php`
+3. ✅ Expected: redirected to dashboard showing 3 cards
 
-### Test 2 — Login (invalid credentials)
-1. On `login.php` enter `admin` / `wrongpassword` → click **Login**
+### Test 2 — Login with invalid credentials
+1. Enter `admin` / `wrongpassword` → click **Login**
 2. ✅ Expected: red alert "Invalid Credentials", stays on login page
 
-### Test 3 — Session protection
-1. While logged out, navigate directly to http://localhost/loginsample/dashboard.php
-2. ✅ Expected: redirected to `login.php`
+### Test 3 — Upload a valid file under 35 MB
+1. Click **File Upload** on the dashboard
+2. Choose any `.txt`, `.pdf`, or image file under 35 MB
+3. Click **Upload & Extract**
+4. ✅ Expected:
+   - Extracted text shown on page
+   - Green success message with "View record" link
+   - Dashboard History card shows updated count
 
-### Test 4 — File upload (PDF or TXT)
-1. Log in → click **File Upload** on the dashboard
-2. Choose any `.txt` or `.pdf` file → click **Upload & Extract**
-3. ✅ Expected: extracted text appears in the result box
+### Test 4 — Verify upload persists (restart test)
+1. Complete Test 3
+2. Stop Apache (close the terminal or XAMPP Control Panel)
+3. Restart Apache
+4. Navigate to http://localhost/loginsample/upload-history.php
+5. ✅ Expected: the upload from Test 3 still appears in the list
 
-### Test 5 — Image upload (OCR)
-1. On the File Upload page, choose a `.jpg` or `.png` containing printed text
-2. ✅ Expected: Tesseract returns the text from the image
+### Test 5 — View upload details
+1. On the history page click **View** next to any upload
+2. ✅ Expected: file name, type, size, upload date, and extracted text are displayed
+3. Click **Download Original File**
+4. ✅ Expected: browser downloads the original file
 
-### Test 6 — Audio transcription
+### Test 6 — Reject a file over 35 MB (JavaScript)
+1. On the upload page choose any file larger than 35 MB
+2. Click **Upload & Extract**
+3. ✅ Expected: browser alert saying "File size cannot exceed 35 MB" — form does NOT submit
+
+### Test 7 — Reject a file over 35 MB (backend bypass simulation)
+1. Temporarily disable JavaScript in your browser (DevTools → Settings → Disable JavaScript)
+2. Choose a file larger than 35 MB → click Upload
+3. ✅ Expected: PHP returns a red alert "File size cannot exceed 35 MB"
+4. Re-enable JavaScript
+
+### Test 8 — Upload multiple files with the same original name
+1. Upload `notes.pdf`
+2. Upload `notes.pdf` again
+3. Open Upload History
+4. ✅ Expected: two separate rows, each with a different stored filename (UUID prefix differs)
+5. Both files download correctly and independently
+
+### Test 9 — Session protection
+1. Log out (click Logout in the navbar)
+2. Navigate directly to http://localhost/loginsample/dashboard.php
+3. ✅ Expected: redirected to login.php
+
+### Test 10 — Audio transcription (existing feature)
 1. Log in → click **Audio Transcription**
-2. Choose a short `.mp3` or `.wav` (under 1 minute for a quick test)
-3. Click **Upload & Transcribe** — button changes to "Transcribing…"
-4. Wait 30 seconds to a few minutes
-5. ✅ Expected: transcript appears in the result box
-
-### Test 7 — Logout
-1. Click **Logout** in the navbar
-2. ✅ Expected: redirected to `login.php`, session is gone
+2. Choose a short `.mp3` or `.wav` file
+3. Click **Upload & Transcribe** — wait for Whisper to finish
+4. ✅ Expected: transcript text displayed on page
 
 ---
 
-## Troubleshooting
+## 13. Important Notes and Limitations
 
-| Symptom | Fix |
-|---|---|
-| `Could not reach the backend` on any PHP page | The Azure Function is not running. Open a terminal and run `func start` inside `LoginFunction/` |
-| `func: command not found` | Install Azure Functions Core Tools: `npm install -g azure-functions-core-tools@4` |
-| Apache won't start | Open XAMPP Control Panel — check if port 80 is in use. Change to port 8080 in `httpd.conf` if needed |
-| Browser shows PHP source code instead of a page | Apache is not running — start it via XAMPP Control Panel |
-| `http://localhost` shows nothing | Apache is not running, or port was changed — use `http://localhost:8080` if you changed the port |
-| Upload fails with "file too large" | `php.ini` is already set to 64 MB. If you changed it, restart Apache for the change to take effect |
-| `whisper_transcribe.py was not found` | Run `dotnet build` inside `LoginFunction/` — the script must be copied to the output directory |
-| `No module named 'whisper'` | Run `py -3.11 -m pip install openai-whisper` |
-| `ffmpeg is not recognized` | Add FFmpeg `bin` folder to your system PATH, then restart the terminal |
-| Empty transcript on valid audio | Audio may contain no speech, or try a more accurate model: set `WHISPER_MODEL=base` in `local.settings.json` |
-| Transcription takes a very long time | Normal for long audio on CPU. The `tiny` model processes roughly 4 minutes of audio in 3–8 minutes |
-| `AzureWebJobsStorage` unhealthy warnings in the func log | Safe to ignore — these are HTTP-only functions and do not use Azure Storage |
-| WPF app audio transcription shows "no audio input" error | This was the original bug — it is fixed. Rebuild with `dotnet build` and restart `func start` |
+### File size limit
+The 35 MB limit is enforced in **two places**:
+- **JavaScript** (`upload-file.php`) — runs before the form submits, gives instant feedback
+- **PHP** (`upload-file.php`) — re-validates on the server, cannot be bypassed by disabling JS
+
+The `php.ini` limits (`upload_max_filesize = 64M`, `post_max_size = 64M`) are intentionally larger than 35 MB so PHP itself never silently truncates a file before the application can validate it.
+
+### File storage
+Uploaded files are stored at:
+```
+C:\xampp\htdocs\loginsample\uploads\
+```
+Each file is saved with a unique name: `{32-character hex token}-{sanitised original name}`. The original name is never used directly as the stored filename, preventing overwrite collisions and path-traversal issues.
+
+### Database storage
+The SQLite file is at:
+```
+C:\xampp\htdocs\loginsample\data\uploads.db
+```
+It is created automatically. To reset all history, delete this file. Uploaded files in `uploads/` are not deleted automatically — remove them manually if needed.
+
+### Audio transcription and history
+Audio transcriptions are **not saved to the upload history database**. Only file uploads (PDF, image, text) are tracked. Audio transcription is a separate feature that displays the result on-screen only.
+
+### Single user
+The application uses a single hardcoded account (`admin` / `1234`). The database stores the `username` column on every upload row so that per-user filtering is already in place. Adding real user accounts in the future requires only adding a users table and a registration/password flow — the history queries will work unchanged.
+
+### Whisper model download
+The first audio transcription triggers an automatic download of the Whisper model weights to `~/.cache/whisper`. This requires an internet connection the first time only. Subsequent transcriptions are fully offline.
+
+### AzureWebJobsStorage warnings
+The Azure Function log shows `AzureWebJobsStorage` unhealthy warnings. These are safe to ignore — all three functions are HTTP-only triggers and do not use Azure Storage.
