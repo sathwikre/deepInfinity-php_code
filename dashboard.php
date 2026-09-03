@@ -4,20 +4,20 @@
 //
 // Shows a welcome message and three navigation cards:
 //   - File / Image Upload  → upload-file.php
-//   - Upload History       → upload-history.php  (NEW)
+//   - Upload History       → upload-history.php
 //   - Audio Transcription  → audio.php
+//
+// Uses the local SQLite database to show the upload count.
+// No external API dependency.
 // ============================================================
 
 require_once 'config.php';
-require_once 'database.php';   // needed for db_get_uploads_for_user / format_file_size
-
+require_once 'database.php';
 require_login();
 
-$username = $_SESSION['username'];
-
-// Show a quick count of how many uploads this user has made
-$uploads      = db_get_uploads_for_user($username);
-$uploadCount  = count($uploads);
+$username    = $_SESSION['username'];
+$uploads     = db_get_uploads_for_user($username);
+$uploadCount = count($uploads);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -45,7 +45,6 @@ $uploadCount  = count($uploads);
             <h1>Welcome, <?= h($username) ?>!</h1>
             <p class="text-muted">You are logged in. Choose a feature below to get started.</p>
 
-            <!-- Three feature cards — uses dashboard-grid-3 (2-column grid) -->
             <div class="dashboard-grid-3">
 
                 <!-- Card 1: File / Image Upload -->
@@ -54,12 +53,12 @@ $uploadCount  = count($uploads);
                     <h3>File / Image Upload</h3>
                     <p>
                         Upload a PDF, text file, or image.<br>
-                        The backend extracts and displays the content.
+                        Text is extracted and saved locally.
                     </p>
                     <a href="upload-file.php">Open</a>
                 </div>
 
-                <!-- Card 2: Upload History (NEW) -->
+                <!-- Card 2: Upload History -->
                 <div class="dash-card">
                     <div class="dash-icon">📋</div>
                     <h3>Upload History</h3>
@@ -81,7 +80,7 @@ $uploadCount  = count($uploads);
                     <h3>Audio Transcription</h3>
                     <p>
                         Upload an MP3 or WAV file.<br>
-                        Whisper converts speech to text locally.
+                        Whisper transcribes speech to text locally.
                     </p>
                     <a href="audio.php">Open</a>
                 </div>

@@ -3,35 +3,40 @@
 // upload-file.php — File / Image upload, text extraction,
 //                   persistent storage and history recording
 //
+// This page is SELF-CONTAINED — no Azure Function or external
+// API is called. All processing happens in PHP locally.
+//
 // Supported formats : .txt  .pdf  .jpg  .jpeg  .png
-// Max file size      : 35 MB  (enforced in JS AND PHP)
+// Max file size      : 35 MB  (enforced in JS AND PHP backend)
 //
 // Flow:
 //   1. User picks a file and clicks "Upload & Extract"
-//   2. JS validates size before the form submits (frontend)
-//   3. PHP validates size again on arrival (backend)
+//   2. JS validates size before form submits (frontend check)
+//   3. PHP re-validates size on the server (backend check)
 //   4. PHP copies file from PHP temp dir → uploads/ with a
-//      unique UUID-based filename so originals never overwrite
-//   5. PHP forwards the file to the Azure Function /api/read-file
-//      which extracts text using PdfPig / Tesseract OCR
-//   6. PHP saves a record to SQLite (metadata + extracted text)
-//   7. PHP displays the extracted text
-//   8. If DB save fails, PHP shows an explicit warning — it never
-//      silently claims the record was saved when it was not
+//      unique UUID-based filename (no overwrites possible)
+//   5. PHP extracts text locally via extract_text_local()
+//      defined in config.php:
+//        .txt  → file_get_contents()
+//        .pdf  → raw PDF stream parser
+//        .jpg/.jpeg/.png → image metadata + Tesseract if available
+//   6. PHP saves metadata + extracted text to SQLite
+//   7. PHP displays the extracted text on the page
+//   8. File appears in Upload History immediately
 // ============================================================
 
 require_once 'config.php';
 require_once 'database.php';
 require_login();
 
-// MAX_UPLOAD_BYTES (35 MB) and UPLOADS_DIR are defined in database.php
+// MAX_UPLOAD_BYTES (35 MB) and UPLOADS_DIR defined in database.php
 $ALLOWED_EXTS = ['txt', 'pdf', 'jpg', 'jpeg', 'png'];
 
-$error   = '';      // shown in red alert
-$warning = '';      // shown in yellow — extraction ok but DB save failed
-$success = '';      // shown in green
-$content = '';      // extracted text from the backend
-$savedId = null;    // DB row id on successful save
+$error   = '';   // shown in red
+$warning = '';   // shown in amber — file saved but DB failed
+$success = '';   // shown in green
+$content = '';   // extracted text to display
+$savedId = null; // DB row id on successful save
 
 // ---- Handle POST -------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -42,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($_FILES['file']['error'] === UPLOAD_ERR_INI_SIZE ||
               $_FILES['file']['error'] === UPLOAD_ERR_FORM_SIZE) {
-        $error = 'File size cannot exceed 35 MB.';
+        $error = 'File exceeds the server upload limit. Maximum allowed size is 35 MB.';
 
     } elseif ($_FILES['file']['error'] !== UPLOAD_ERR_OK) {
         $error = 'Upload error (code ' . (int)$_FILES['file']['error'] . '). Please try again.';
@@ -59,43 +64,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    . 'Allowed: .txt, .pdf, .jpg, .jpeg, .png.';
 
         } elseif ($fileSize === 0) {
-            $error = 'The selected file is empty.';
+            $error = 'The selected file is empty (0 bytes).';
 
         } elseif ($fileSize > MAX_UPLOAD_BYTES) {
-            // Backend re-check — catches any bypass of the JS check
+            // Server-side re-check — catches any bypass of the JS check
             $error = 'File size cannot exceed 35 MB. '
                    . 'Your file is ' . format_file_size($fileSize) . '.';
 
         } else {
-            // --- Step 3: save to uploads/ with a unique name ---
+            // --- Step 3: save to uploads/ with a unique name --
+            // generate_stored_filename() in database.php creates:
+            //   {32-hex-chars}-{sanitised-original-name}
+            // so two files named "notes.pdf" get different names.
             $storedName = generate_stored_filename($origName);
-            $storedPath = UPLOADS_DIR . $storedName;   // absolute path
-            $relPath    = 'uploads/' . $storedName;    // relative, stored in DB
+            $storedPath = UPLOADS_DIR . $storedName;  // absolute path on disk
+            $relPath    = 'uploads/' . $storedName;   // relative path stored in DB
+
+            if (!is_dir(UPLOADS_DIR)) {
+                mkdir(UPLOADS_DIR, 0755, true);
+            }
 
             if (!move_uploaded_file($tmpPath, $storedPath)) {
-                $error = 'Failed to save the uploaded file to disk. '
-                       . 'Check that the uploads/ directory is writable.';
+                $error = 'Failed to save the uploaded file. '
+                       . 'Check that the uploads/ directory is writable by Apache.';
             } else {
-                // --- Step 4: call the Azure Function ----------
-                $mimeType = get_mime_type($ext);
-                $result   = call_api_multipart(
-                    '/read-file',
-                    $storedPath,   // read from the saved copy
-                    $origName,
-                    $mimeType,
-                    30
-                );
-
-                $returnedName = $result['fileName'] ?? $origName;
-                $extractOk    = !empty($result['success']) && $result['success'] === true;
+                // --- Step 4: extract text locally -------------
+                // extract_text_local() is defined in config.php.
+                // No external API call — everything runs in PHP.
+                $result    = extract_text_local($storedPath, $ext);
+                $extractOk = !empty($result['success']) && $result['success'] === true;
 
                 if ($extractOk) {
                     $content = $result['content'] ?? '';
                 }
 
                 // --- Step 5: save record to SQLite ------------
-                // We save the record regardless of extraction success
-                // so every upload attempt appears in history.
+                // Always save — even if extraction produced no text —
+                // so every upload appears in history.
                 $dbError = '';
                 try {
                     $savedId = db_insert_upload([
@@ -112,20 +117,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $dbError = $e->getMessage();
                 }
 
-                // --- Step 6: set user-facing messages ---------
+                // --- Step 6: user-facing messages -------------
                 if (!$extractOk) {
-                    // Extraction failed
-                    $error = $result['message']
-                           ?? 'The backend could not extract content from this file.';
+                    // Extraction reported failure (unlikely with local extractor,
+                    // but handle it cleanly anyway)
+                    $extractMsg = $result['message'] ?? 'Could not extract text from this file.';
+                    if ($dbError === '') {
+                        // File saved and DB record created even without text
+                        $warning = h($extractMsg)
+                                 . ' The file was saved and appears in history.';
+                        $success = 'File uploaded. '
+                                 . '<a href="upload-details.php?id=' . $savedId . '">View record</a>';
+                    } else {
+                        $error = h($extractMsg);
+                    }
                 } elseif ($dbError !== '') {
-                    // Extraction succeeded but DB save failed — show warning
-                    $warning = 'Text was extracted successfully, but the upload '
-                             . 'could not be saved to history. Database error: '
-                             . h($dbError);
+                    // Text extracted but DB save failed — warn explicitly
+                    $warning = 'Text was extracted successfully but the upload could not be '
+                             . 'saved to history. Database error: ' . h($dbError);
                     $success = 'Content extracted from "' . h($origName) . '".';
                 } else {
-                    $success = 'Content extracted and saved to history. '
-                             . '<a href="upload-details.php?id=' . $savedId . '">View record</a>';
+                    $success = 'File uploaded and content extracted. '
+                             . '<a href="upload-details.php?id=' . $savedId . '">View record</a> &nbsp;|&nbsp; '
+                             . '<a href="upload-history.php">Upload History</a>';
                 }
             }
         }
@@ -157,8 +171,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="card">
             <h1>📄 File / Image Upload</h1>
 
+            <!-- php.ini note: upload_max_filesize and post_max_size must be >= 35M -->
             <?php if ($error !== ''): ?>
-                <div class="alert alert-error"><?= h($error) ?></div>
+                <div class="alert alert-error"><?= $error ?></div>
             <?php endif; ?>
 
             <?php if ($warning !== ''): ?>
@@ -177,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="file" id="file" name="file"
                            accept=".txt,.pdf,.jpg,.jpeg,.png" required>
                     <small>
-                        Supported: .txt · .pdf · .jpg · .jpeg · .png
+                        Supported: .txt &middot; .pdf &middot; .jpg &middot; .jpeg &middot; .png
                         &nbsp;|&nbsp; Max size: <strong>35 MB</strong>
                     </small>
                 </div>
@@ -191,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
 
                 <div class="spinner" id="spinner">
-                    ⏳ Extracting content, please wait…
+                    ⏳ Processing file, please wait…
                 </div>
 
             </form>
@@ -207,29 +222,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <script>
-    // ---- Frontend file size validation (35 MB = 35 * 1024 * 1024) ----
-    // This runs before the form submits so the user gets instant feedback.
-    // The PHP backend re-validates the same limit — never trust only JS.
+    // ---- Frontend file-size guard (35 MB = 35 * 1024 * 1024 bytes) ----
+    // Gives instant feedback before the browser even starts uploading.
+    // PHP re-validates the same limit server-side — JS can be bypassed
+    // but PHP cannot.
     const MAX_BYTES = <?= MAX_UPLOAD_BYTES ?>;
 
     document.getElementById('uploadForm').addEventListener('submit', function (e) {
         const fileInput = document.getElementById('file');
 
         if (fileInput.files.length > 0) {
-            const fileSize = fileInput.files[0].size;
-
-            if (fileSize > MAX_BYTES) {
-                e.preventDefault(); // stop the form from submitting
-                alert('File size cannot exceed 35 MB.\n'
-                    + 'Your file is '
-                    + (fileSize / (1024 * 1024)).toFixed(1)
-                    + ' MB.');
+            const size = fileInput.files[0].size;
+            if (size > MAX_BYTES) {
+                e.preventDefault();
+                alert(
+                    'File size cannot exceed 35 MB.\n' +
+                    'Your file is ' + (size / (1024 * 1024)).toFixed(1) + ' MB.'
+                );
                 return;
             }
         }
 
-        // File is within limit — show spinner and disable button
+        // Within limit — show spinner and disable button to prevent double-submit
         document.getElementById('submitBtn').disabled = true;
+        document.getElementById('submitBtn').textContent = 'Uploading…';
         document.getElementById('spinner').classList.add('visible');
     });
     </script>

@@ -2,9 +2,12 @@
 // ============================================================
 // upload-history.php — Shows all uploads for the logged-in user
 //
-// Fetches every row from the uploads table where username
-// matches $_SESSION['username'], sorted newest first.
-// Each row has a "View" link to upload-details.php?id={id}.
+// Data comes entirely from the local SQLite database (data/uploads.db).
+// No external API or Azure Function is used.
+//
+// Displays: File Name | Type | Size | Uploaded At | Actions
+// Sorted:   Newest first (ORDER BY id DESC in db helper)
+// Filtered: Only rows belonging to $_SESSION['username']
 // ============================================================
 
 require_once 'config.php';
@@ -13,7 +16,7 @@ require_login();
 
 $username = $_SESSION['username'];
 
-// Fetch all uploads for this user — newest first (ORDER BY id DESC in helper)
+// Fetch all uploads for this user — newest first
 $uploads = db_get_uploads_for_user($username);
 ?>
 <!DOCTYPE html>
@@ -37,12 +40,12 @@ $uploads = db_get_uploads_for_user($username);
         </nav>
     </div>
 
-    <div class="page-wrapper" style="max-width:900px">
+    <div class="page-wrapper" style="max-width:960px">
         <div class="card">
             <h1>📋 Upload History</h1>
 
             <?php if (empty($uploads)): ?>
-                <!-- No uploads yet — guide the user -->
+                <!-- No uploads yet -->
                 <div class="alert alert-info">
                     No uploads yet. <a href="upload-file.php">Upload your first file</a>
                     to see it here.
@@ -50,7 +53,8 @@ $uploads = db_get_uploads_for_user($username);
 
             <?php else: ?>
                 <p class="text-muted" style="margin-bottom:1rem">
-                    Showing <?= count($uploads) ?> upload(s) for
+                    Showing <strong><?= count($uploads) ?></strong>
+                    upload<?= count($uploads) !== 1 ? 's' : '' ?> for
                     <strong><?= h($username) ?></strong> — newest first.
                 </p>
 
@@ -69,48 +73,46 @@ $uploads = db_get_uploads_for_user($username);
                         <tbody>
                         <?php foreach ($uploads as $i => $row): ?>
                             <tr>
-                                <!-- Row number (1-based, counting from newest) -->
                                 <td class="td-num"><?= $i + 1 ?></td>
 
-                                <!-- Original filename, truncated if very long -->
                                 <td class="td-name" title="<?= h($row['original_name']) ?>">
                                     <?= h($row['original_name']) ?>
                                 </td>
 
-                                <!-- File type badge -->
                                 <td>
                                     <span class="badge badge-<?= strtolower(h($row['file_type'])) ?>">
                                         <?= h($row['file_type']) ?>
                                     </span>
                                 </td>
 
-                                <!-- Human-readable file size -->
                                 <td><?= h(format_file_size((int)$row['file_size'])) ?></td>
 
-                                <!-- Upload timestamp -->
                                 <td><?= h($row['uploaded_at']) ?></td>
 
-                                <!-- View button links to the detail page -->
                                 <td>
                                     <a href="upload-details.php?id=<?= (int)$row['id'] ?>"
                                        class="btn btn-primary btn-sm">
                                         View
+                                    </a>
+                                    &nbsp;
+                                    <a href="download.php?id=<?= (int)$row['id'] ?>"
+                                       class="btn btn-secondary btn-sm">
+                                        ⬇
                                     </a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
                     </table>
-                </div><!-- .table-wrapper -->
+                </div>
 
             <?php endif; ?>
 
             <div class="mt-2">
-                <a href="upload-file.php" class="btn btn-primary">
-                    + Upload New File
+                <a href="upload-file.php" class="btn btn-primary">+ Upload New File</a>
+                <a href="dashboard.php" class="btn btn-secondary" style="margin-left:.5rem">
+                    Back to Dashboard
                 </a>
-                <a href="dashboard.php" class="btn btn-secondary"
-                   style="margin-left:.5rem">Back to Dashboard</a>
             </div>
 
         </div>

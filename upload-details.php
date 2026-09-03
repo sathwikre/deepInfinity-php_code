@@ -5,9 +5,11 @@
 //
 // URL parameter: ?id=<integer>
 //
-// Security: db_get_upload_by_id() always filters by both
-// id AND the logged-in username, so a user can never view
-// another user's records by guessing an id.
+// Data source: local SQLite database only (no external API).
+//
+// Security:
+//   db_get_upload_by_id() filters by BOTH id AND username,
+//   so users can never view another user's records.
 // ============================================================
 
 require_once 'config.php';
@@ -16,18 +18,16 @@ require_login();
 
 $username = $_SESSION['username'];
 
-// Read and sanitise the id from the URL query string.
-// (int) casting converts any non-numeric value to 0,
+// (int) cast converts anything non-numeric to 0,
 // which will not match any real row.
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
 if ($id <= 0) {
-    // Bad or missing id — go back to history
     header('Location: upload-history.php');
     exit;
 }
 
-// Fetch the record — returns null if id not found or belongs to another user
+// Returns null if id not found or belongs to another user
 $record = db_get_upload_by_id($id, $username);
 
 if ($record === null) {
@@ -35,9 +35,17 @@ if ($record === null) {
     exit;
 }
 
-// Check whether the physical file still exists on disk
+// Check if the physical file still exists on disk
 $absoluteFilePath = __DIR__ . '/' . $record['file_path'];
 $fileExists       = file_exists($absoluteFilePath);
+
+// Format the upload date nicely for display
+$uploadedAt = $record['uploaded_at'];
+$dateDisplay = $uploadedAt;
+$ts = strtotime($uploadedAt);
+if ($ts !== false) {
+    $dateDisplay = date('F j, Y \a\t g:i A', $ts);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -64,7 +72,7 @@ $fileExists       = file_exists($absoluteFilePath);
         <div class="card">
             <h1>🔍 Upload Details</h1>
 
-            <!-- Metadata table -->
+            <!-- File metadata table -->
             <table class="details-table">
                 <tr>
                     <th>File Name</th>
@@ -88,21 +96,22 @@ $fileExists       = file_exists($absoluteFilePath);
                 </tr>
                 <tr>
                     <th>Uploaded At</th>
-                    <td><?= h($record['uploaded_at']) ?></td>
+                    <td><?= h($dateDisplay) ?></td>
                 </tr>
                 <tr>
                     <th>Stored As</th>
-                    <td class="text-muted"><?= h($record['stored_name']) ?></td>
+                    <td class="text-muted" style="font-size:0.82rem;word-break:break-all">
+                        <?= h($record['stored_name']) ?>
+                    </td>
                 </tr>
             </table>
 
-            <!-- Download link — only shown if the file still exists on disk -->
+            <!-- Download button — only if the file still exists on disk -->
             <?php if ($fileExists): ?>
                 <div class="mt-2">
                     <!--
-                        The download goes through download.php which validates
-                        ownership again before streaming the file bytes —
-                        we never expose a raw filesystem path in the URL.
+                        download.php re-validates ownership before streaming the file.
+                        We never expose the raw filesystem path in the URL.
                     -->
                     <a href="download.php?id=<?= (int)$record['id'] ?>"
                        class="btn btn-secondary">
@@ -119,11 +128,14 @@ $fileExists       = file_exists($absoluteFilePath);
             <!-- Extracted text -->
             <div class="result-box mt-3">
                 <h2>Extracted Content</h2>
-                <?php if ($record['extracted_text'] !== ''): ?>
+                <?php if (trim($record['extracted_text']) !== ''): ?>
                     <textarea readonly><?= h($record['extracted_text']) ?></textarea>
                 <?php else: ?>
-                    <p class="text-muted">
+                    <p class="text-muted" style="padding:.5rem 0">
                         No extracted text was saved for this upload.
+                        <?php if (in_array(strtolower($record['file_type']), ['jpg','jpeg','png'])): ?>
+                            Image OCR requires Tesseract to be installed on the server.
+                        <?php endif; ?>
                     </p>
                 <?php endif; ?>
             </div>
@@ -133,8 +145,7 @@ $fileExists       = file_exists($absoluteFilePath);
                 <a href="upload-history.php" class="btn btn-secondary">
                     ← Back to History
                 </a>
-                <a href="upload-file.php" class="btn btn-primary"
-                   style="margin-left:.5rem">
+                <a href="upload-file.php" class="btn btn-primary" style="margin-left:.5rem">
                     + Upload Another File
                 </a>
             </div>
